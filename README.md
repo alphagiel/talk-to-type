@@ -142,6 +142,21 @@ automatically:
   heavy load from other apps, Whisper will be slow too. Check Activity
   Monitor if this seems unusually severe.
 
+## Todo
+
+- **Make the background process self-healing.** It currently only starts at
+  login (`RunAtLoad: true`) and does not restart itself if it ever quits
+  unexpectedly (a crash, or accidentally clicking "Quit" in the menu bar) —
+  `KeepAlive` is set to `false` in `scripts/launch_agent.sh`'s generated
+  LaunchAgent. This has caused confusing "the hotkey just stopped working"
+  moments where the fix was simply restarting it
+  (`npm run enable-autostart`). Flipping `KeepAlive` to `true` would fix
+  this, at the tradeoff of possibly crash-looping if something is
+  genuinely broken instead of failing visibly once.
+- **Confirm collaborator access works end-to-end** for anyone invited to
+  the private repo — clone, `npm install`, first run, permission setup,
+  all the way through a working dictation.
+
 ## Roadmap
 
 - **Windows support** — currently macOS-only. The app is built entirely on
