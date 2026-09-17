@@ -156,6 +156,16 @@ automatically:
 - **Confirm collaborator access works end-to-end** for anyone invited to
   the private repo — clone, `npm install`, first run, permission setup,
   all the way through a working dictation.
+- **Fix dictation in iMessage.** Reported broken by a collaborator testing
+  on their own Mac ("working" everywhere else they tried, "not for my
+  iMessage app"). Not yet reproduced or root-caused on the original dev
+  machine — iMessage's compose box tested fine there (recognized as
+  `AXTextField`, inserted successfully) — so this looks like it may be
+  machine/version-specific rather than a universal bug. Next step: get the
+  exact symptom from the reporter (nothing happens at all vs. wrong
+  text vs. partial text) and, ideally, have them run the AX-role
+  diagnostic against their own Messages compose box to see what it
+  actually reports there.
 
 ## Roadmap
 
