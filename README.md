@@ -142,6 +142,19 @@ automatically:
   heavy load from other apps, Whisper will be slow too. Check Activity
   Monitor if this seems unusually severe.
 
+## Roadmap
+
+- **Windows support** — currently macOS-only. The app is built entirely on
+  Apple-specific frameworks (Accessibility API for text insertion, AppKit
+  for the floating indicator, `rumps` for the menu bar icon), so this would
+  mean rewriting the permissions, text-insertion, and tray-icon layers with
+  Windows equivalents rather than a small patch.
+- **Mobile support** — running this on a phone/tablet. A different problem
+  from Windows support: mobile OSes don't expose the same kind of
+  system-wide "insert text into whatever app is focused" capability, so
+  this would likely need a different interaction model (e.g. a keyboard
+  extension or share-sheet action) rather than a direct port.
+
 ## License
 
 MIT
