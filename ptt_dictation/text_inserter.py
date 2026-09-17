@@ -67,6 +67,9 @@ _BROWSER_BUNDLE_IDS = {
     "com.microsoft.VSCodeInsiders",
     "com.vscodium",
     "com.tinyspeck.slackmacgap",
+    "com.microsoft.teams2",
+    "com.microsoft.teams",
+    "com.apple.MobileSMS",
 }
 
 _kAXFocusedUIElementAttribute = "AXFocusedUIElement"

@@ -28,7 +28,7 @@ def _log(message: str) -> None:
 
 class PTTDictationApp(rumps.App):
     def __init__(self):
-        super().__init__("PTT Dictation", title="\U0001F3A4", quit_button=None)
+        super().__init__("PTT Dictation", title="\U0001F50A", quit_button=None)
         self.config = config.load_config()
         self.listener = None
         self.recorder = AudioRecorder()
@@ -42,6 +42,10 @@ class PTTDictationApp(rumps.App):
         # that same app next time, we add a leading space so back-to-back
         # sentences don't run together with no gap between them.
         self._last_insert_bundle_id = None
+
+        @rumps.events.before_start.register
+        def _set_tooltip():
+            self._nsapp.nsstatusitem.setToolTip_("Talk and Type")
 
         self.permissions_item = rumps.MenuItem(
             "Check Permissions", callback=self.check_permissions
