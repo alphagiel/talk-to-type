@@ -1,0 +1,10 @@
+rumps
+pynput
+pyobjc-core
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+pyobjc-framework-ApplicationServices
+pyobjc-framework-AVFoundation
+sounddevice
+numpy
+faster-whisper

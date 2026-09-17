@@ -1,0 +1,33 @@
+{
+  "name": "ptt-dictation",
+  "version": "0.1.0",
+  "description": "Push-to-talk local dictation for macOS -- hold a key, speak, and the text is typed into whatever app has focus. Runs fully offline (Whisper via faster-whisper), no cloud transcription.",
+  "os": ["darwin"],
+  "engines": {
+    "node": ">=16"
+  },
+  "bin": {
+    "ptt-dictation": "./bin/ptt-dictation.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "enable-autostart": "bash scripts/launch_agent.sh install",
+    "disable-autostart": "bash scripts/launch_agent.sh uninstall",
+    "autostart-status": "bash scripts/launch_agent.sh status"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "ptt_dictation",
+    "requirements.txt"
+  ],
+  "keywords": [
+    "dictation",
+    "speech-to-text",
+    "whisper",
+    "macos",
+    "push-to-talk",
+    "accessibility"
+  ],
+  "license": "MIT"
+}
