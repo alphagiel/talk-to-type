@@ -3,7 +3,7 @@
 // wrapper around a Python app -- npm can't install Python dependencies
 // itself, so this script finds a suitable Python, builds a private
 // virtualenv inside this package, and installs the Python requirements
-// into it. bin/ptt-dictation.js then runs that venv's Python directly.
+// into it. bin/talk-and-type.js then runs that venv's Python directly.
 "use strict";
 
 const { spawnSync } = require("child_process");
@@ -27,7 +27,7 @@ const CANDIDATE_PYTHONS = [
 ];
 
 function fail(message) {
-  console.error(`\nptt-dictation install failed: ${message}\n`);
+  console.error(`\ntalk-and-type install failed: ${message}\n`);
   process.exit(1);
 }
 
@@ -92,11 +92,11 @@ function main() {
 
   console.log("\nInstalled successfully.\n");
   console.log("Before running it, this Mac needs to grant three permissions to");
-  console.log("whatever app runs `ptt-dictation` (Terminal, iTerm, etc.):");
+  console.log("whatever app runs `talk-and-type` (Terminal, iTerm, etc.):");
   console.log("  - Microphone");
   console.log("  - Accessibility");
   console.log("  - Input Monitoring");
-  console.log("\nRun `ptt-dictation` and it'll tell you exactly what's missing.\n");
+  console.log("\nRun `talk-and-type` and it'll tell you exactly what's missing.\n");
 }
 
 main();

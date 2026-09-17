@@ -1,5 +1,5 @@
 {
-  "name": "ptt-dictation",
+  "name": "talk-and-type",
   "version": "0.1.0",
   "description": "Push-to-talk local dictation for macOS -- hold a key, speak, and the text is typed into whatever app has focus. Runs fully offline (Whisper via faster-whisper), no cloud transcription.",
   "os": ["darwin"],
@@ -7,7 +7,7 @@
     "node": ">=16"
   },
   "bin": {
-    "ptt-dictation": "./bin/ptt-dictation.js"
+    "talk-and-type": "./bin/talk-and-type.js"
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",

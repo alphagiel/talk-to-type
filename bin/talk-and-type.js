@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The actual `ptt-dictation` command. All the real logic is Python --
+// The actual `talk-and-type` command. All the real logic is Python --
 // this just finds the private virtualenv postinstall.js built and runs
 // the app inside it, passing through stdio so you see the same console
 // output you'd get running Python directly.
