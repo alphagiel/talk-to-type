@@ -118,6 +118,116 @@ automatically:
   draw their own text. These are recognized by app identity and always
   treated as valid targets, typed via simulated keystrokes.
 
+## Architecture
+
+Node is a launcher only — `bin/talk-to-type.js` spawns a private venv's Python
+and passes stdio through. `scripts/postinstall.js` builds that venv on
+`npm install`. Everything else — hotkey detection, recording, transcription,
+text insertion, the menu bar UI — is the Python package `ptt_dictation`,
+orchestrated by `PTTDictationApp` (`main.py`, a `rumps.App` subclass running
+the AppKit runloop on the main thread).
+
+```mermaid
+graph TD
+    subgraph Node["Node.js (launcher only)"]
+        PI[scripts/postinstall.js]
+        CLI[bin/talk-to-type.js]
+    end
+    subgraph Python["Python process — ptt_dictation"]
+        Main["main.py<br/>PTTDictationApp"]
+        Hotkey[hotkey_listener.py]
+        Audio[audio_recorder.py]
+        Trans[transcriber.py]
+        Insert[text_inserter.py]
+        Overlay[indicator_overlay.py]
+        Perm[permissions.py]
+        Config[config.py]
+    end
+    subgraph OS["macOS / external"]
+        AX[Accessibility API]
+        Quartz["Quartz / CGEvent"]
+        AV["AVFoundation (mic)"]
+        PA["PortAudio (sounddevice)"]
+        HF["faster-whisper / Hugging Face model"]
+    end
+
+    PI -- "npm install: builds venv, pip installs deps" --> Python
+    CLI -- "spawn python -m ptt_dictation.main" --> Main
+
+    Main --> Hotkey
+    Main --> Audio
+    Main --> Trans
+    Main --> Insert
+    Main --> Overlay
+    Main --> Perm
+    Main --> Config
+
+    Hotkey --> Quartz
+    Insert --> AX
+    Insert --> Quartz
+    Audio --> PA
+    Perm --> AX
+    Perm --> AV
+    Perm --> Quartz
+    Trans --> HF
+```
+
+Sequence for one hold-to-release cycle:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Hotkey as hotkey_listener
+    participant App as main.py (PTTDictationApp)
+    participant Perm as permissions
+    participant Insert as text_inserter
+    participant Rec as audio_recorder
+    participant Overlay as indicator_overlay
+    participant Trans as transcriber (bg thread)
+
+    User->>Hotkey: holds hotkey
+    Hotkey->>App: _on_hotkey_down()
+    App->>Perm: check_accessibility() / microphone_denied()
+    App->>Insert: focused_field_is_text_input()
+    Insert-->>App: (true, role) — else bail, no mic
+    App->>Rec: start()
+    App->>Overlay: set_state("listening")
+
+    User->>Hotkey: releases hotkey
+    Hotkey->>App: _on_hotkey_up()
+    App->>Rec: stop() → (buffer, sample_rate)
+    App->>Overlay: set_state("transcribing")
+    App->>App: spawn daemon thread _process_recording()
+
+    Note over App,Trans: offloaded to a background thread so the<br/>hotkey callback returns fast (macOS can disable<br/>a "stuck" key-tap otherwise)
+    App->>Trans: transcribe(buffer)
+    Trans-->>App: text
+    App->>Insert: focused_field_is_text_input() (re-check — focus may have moved)
+    App->>Insert: insert_text(text)
+    Insert-->>App: "ax" | "keystroke" | "failed"
+    App->>Overlay: hide() / flash("error" | "discarded")
+```
+
+### Module reference
+
+| Module | Responsibility | Key entry points |
+| --- | --- | --- |
+| `main.py` | Orchestrates everything; `rumps.App` runloop on the main thread | `PTTDictationApp` |
+| `hotkey_listener.py` | Global key down/up detection | `create_listener()` → `PynputHotkeyListener` (right_option/right_command) or `FnHotkeyListener` (raw Quartz event tap) |
+| `audio_recorder.py` | Mic capture into an in-memory buffer | `AudioRecorder.start()` / `.stop()`, `rms()` |
+| `transcriber.py` | Runs Whisper on the recorded buffer | `Transcriber.load()`, `.is_ready`, `.transcribe(buffer)` |
+| `text_inserter.py` | Finds the focused text field and types the result in | `focused_field_is_text_input()`, `frontmost_bundle_id()`, `insert_text()` |
+| `indicator_overlay.py` | Floating "Listening / Transcribing" indicator | `IndicatorOverlay.set_state()`, `.hide()` |
+| `permissions.py` | Checks/prompts for Accessibility, Mic, Input Monitoring | `check_accessibility()`, `microphone_denied()`, `missing_permissions()` |
+| `config.py` | Reads/writes `~/Library/Application Support/PTTDictation/config.json` | `load_config()`, `save_config()` |
+
+Threading model: hotkey listening runs on its own thread (pynput's internal
+thread, or a polling daemon thread for `fn`); the Whisper model loads on a
+background thread at startup; and each hold-to-release cycle's transcription
+and text insertion runs on a fresh daemon thread so the hotkey callback
+itself stays fast. `IndicatorOverlay.set_state()` marshals back to the main thread
+(`AppHelper.callAfter`) since AppKit UI must run there.
+
 ## Privacy
 
 - Audio is recorded straight into memory, transcribed, and the buffer is
