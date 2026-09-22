@@ -1,6 +1,6 @@
 {
   "name": "talk-to-type",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Push-to-talk local dictation for macOS -- hold a key, speak, and the text is typed into whatever app has focus. Runs fully offline (Whisper via faster-whisper), no cloud transcription.",
   "os": ["darwin"],
   "engines": {
