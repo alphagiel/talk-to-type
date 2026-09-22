@@ -76,6 +76,11 @@ Nothing happens if you hold the key with no text field focused (Desktop,
 Finder, a button) — that's intentional, not a bug: the mic never even
 turns on in that case.
 
+If it ever seems stuck on "Transcribing" longer than expected, hit **Esc**
+to force-cancel it — that immediately clears the stuck state so you can
+hold the key again right away. (Because of this, Escape can never be set
+as your push-to-talk key.)
+
 ## Configuration
 
 Settings are stored at:
@@ -251,6 +256,8 @@ itself stays fast. `IndicatorOverlay.set_state()` marshals back to the main thre
 - **Model takes a long time to load / transcribe** — if your Mac is under
   heavy load from other apps, Whisper will be slow too. Check Activity
   Monitor if this seems unusually severe.
+- **Stuck on "Transcribing"** — hit **Esc** to force-cancel it and free up
+  the hotkey right away, instead of waiting it out.
 
 ## Todo
 
