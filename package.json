@@ -7,7 +7,7 @@
     "node": ">=16"
   },
   "bin": {
-    "talk-to-type": "./bin/talk-to-type.js"
+    "talk-to-type": "bin/talk-to-type.js"
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
