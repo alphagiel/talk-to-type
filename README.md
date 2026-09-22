@@ -1,4 +1,4 @@
-# talk-and-type
+# talk-to-type
 
 Push-to-talk dictation for macOS. Hold a key, speak, let go — the words are
 typed straight into whatever app has focus. Transcription runs fully
@@ -23,7 +23,7 @@ so nothing you say is sent anywhere.
 ## Install
 
 ```
-npm install -g talk-and-type
+npm install -g talk-to-type
 ```
 
 This is a Node/npm wrapper around a Python app — npm can't install Python
@@ -37,7 +37,7 @@ install can take a minute or two.
 ### 1. Grant three macOS permissions
 
 Go to **System Settings → Privacy & Security** and grant these to whatever
-app actually runs the `talk-and-type` command (your Terminal, iTerm2, or VS
+app actually runs the `talk-to-type` command (your Terminal, iTerm2, or VS
 Code — not to "the script" itself):
 
 | Permission | Why it's needed |
@@ -50,7 +50,7 @@ After granting Accessibility and Input Monitoring, **fully quit and reopen**
 that terminal app — permission grants don't take effect until the app
 restarts.
 
-Run `talk-and-type` any time to get a live status check — the menu bar
+Run `talk-to-type` any time to get a live status check — the menu bar
 icon's **Check Permissions** item tells you exactly what's still missing and
 can jump you straight to the right settings page.
 
@@ -64,7 +64,7 @@ locally and loads in about 2-3 seconds on every future launch.
 ## Usage
 
 ```
-talk-and-type
+talk-to-type
 ```
 
 This starts the menu bar app. By default, hold **Right Option** to talk,

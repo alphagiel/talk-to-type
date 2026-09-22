@@ -1,5 +1,5 @@
 #!/bin/bash
-# Manages a macOS LaunchAgent so talk-and-type starts automatically at
+# Manages a macOS LaunchAgent so talk-to-type starts automatically at
 # login instead of needing to be run from a terminal every time.
 #
 # Usage:
@@ -10,7 +10,7 @@ set -euo pipefail
 
 PACKAGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_PYTHON="$PACKAGE_ROOT/venv/bin/python"
-LABEL="com.talk-and-type.agent"
+LABEL="com.talk-to-type.agent"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/PTTDictation"
 
