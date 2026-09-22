@@ -10,10 +10,11 @@ import time
 
 import rumps
 import sounddevice as sd
+from pynput import keyboard
 
 from ptt_dictation import config, permissions, text_inserter
 from ptt_dictation.audio_recorder import AudioRecorder, rms
-from ptt_dictation.hotkey_listener import create_listener
+from ptt_dictation.hotkey_listener import PynputHotkeyListener, create_listener
 from ptt_dictation.indicator_overlay import IndicatorOverlay
 from ptt_dictation.transcriber import Transcriber
 
@@ -38,6 +39,14 @@ class PTTDictationApp(rumps.App):
         self._recording_active = False
         self._busy = False
         self._max_length_timer = None
+        # Bumped on every new hold and on every force-cancel. A background
+        # _process_recording thread checks this before touching shared state
+        # or typing anything -- if it's stale (Esc cancelled it, or another
+        # hold already started), it just drops its result instead.
+        self._generation = 0
+        self.escape_listener = PynputHotkeyListener(
+            keyboard.Key.esc, on_down=self._on_escape, on_up=lambda: None
+        )
         # Which app we last successfully typed into -- if you're still in
         # that same app next time, we add a leading space so back-to-back
         # sentences don't run together with no gap between them.
@@ -67,6 +76,7 @@ class PTTDictationApp(rumps.App):
 
         self._startup_permission_check()
         self._start_listener()
+        self.escape_listener.start()
         self._start_model_loading()
 
     # -- Transcription model ----------------------------------------------
@@ -191,6 +201,23 @@ class PTTDictationApp(rumps.App):
         _log(f"Max recording length ({self.config['max_record_seconds']}s) reached, auto-stopping.")
         self._on_hotkey_up()
 
+    def _on_escape(self):
+        if not (self._recording_active or self._busy):
+            return  # Nothing in flight -- let Esc do whatever it normally does.
+        _log("ESC pressed, force-cancelling.")
+        self._generation += 1
+        if self._max_length_timer:
+            self._max_length_timer.cancel()
+            self._max_length_timer = None
+        if self._recording_active:
+            self._recording_active = False
+            try:
+                self.recorder.stop()
+            except Exception as e:
+                _log(f"Error stopping recorder during cancel: {e}")
+        self._busy = False
+        self._flash("discarded")
+
     def _on_hotkey_up(self):
         _log("Hotkey UP")
         if self._max_length_timer:
@@ -209,11 +236,14 @@ class PTTDictationApp(rumps.App):
         # will think that key-watching is broken and shut it off.
         buffer, sample_rate = self.recorder.stop()
         held_ms = (time.time() - self._press_time) * 1000 if self._press_time else 0
+        generation = self._generation
         threading.Thread(
-            target=self._process_recording, args=(buffer, sample_rate, held_ms), daemon=True
+            target=self._process_recording,
+            args=(buffer, sample_rate, held_ms, generation),
+            daemon=True,
         ).start()
 
-    def _process_recording(self, buffer, sample_rate, held_ms):
+    def _process_recording(self, buffer, sample_rate, held_ms, generation):
         try:
             if held_ms < self.config["min_hold_ms"]:
                 _log(f"Discarded: held for {held_ms:.0f}ms, below {self.config['min_hold_ms']}ms minimum.")
@@ -230,8 +260,14 @@ class PTTDictationApp(rumps.App):
                 return
 
             # Audio never touches disk -- it's transcribed straight from
-            # memory and the buffer is dropped right after.
+            # memory and the buffer is dropped right after. This is the
+            # slow, blocking step -- if Esc cancelled us while we were in
+            # here, don't touch shared state or type anything once it
+            # finally returns.
             text = self.transcriber.transcribe(buffer)
+            if generation != self._generation:
+                _log("Discarded: cancelled while transcribing.")
+                return
             _log(f"TRANSCRIPT: {text!r}")
 
             if not text:
@@ -263,13 +299,19 @@ class PTTDictationApp(rumps.App):
                 self._last_insert_bundle_id = bundle_id
                 self.overlay.hide()
         finally:
-            self._busy = False
+            # Only clear _busy if a newer hold/cancel hasn't already done
+            # so -- otherwise a late-finishing cancelled run could
+            # re-enable input processing before it's actually settled.
+            if generation == self._generation:
+                self._busy = False
 
     # -- Lifecycle ---------------------------------------------------------
 
     def quit_app(self, _sender):
         if self.listener:
             self.listener.stop()
+        if self.escape_listener:
+            self.escape_listener.stop()
         rumps.quit_application()
 
 
