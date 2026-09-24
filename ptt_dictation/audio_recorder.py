@@ -43,11 +43,8 @@ class AudioRecorder:
         done = threading.Event()
 
         def _teardown():
-            _log("calling stream.stop()")
             stream.stop()
-            _log("stream.stop() returned, calling stream.close()")
             stream.close()
-            _log("stream.close() returned")
             done.set()
 
         threading.Thread(target=_teardown, daemon=True).start()
@@ -75,19 +72,15 @@ class AudioRecorder:
         self._stream.start()
 
     def stop(self) -> tuple:
-        _log("stop() called")
         if self._stream is not None:
             self._close_stream_with_timeout(self._stream)
             self._stream = None
 
         if not self._chunks:
-            _log("no chunks recorded, returning empty buffer")
             return np.zeros((0,), dtype=np.float32), self.sample_rate
 
-        _log(f"concatenating {len(self._chunks)} chunks")
         buffer = np.concatenate(self._chunks, axis=0).flatten()
         self._chunks = []
-        _log("stop() done")
         return buffer, self.sample_rate
 
 

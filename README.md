@@ -257,7 +257,11 @@ itself stays fast. `IndicatorOverlay.set_state()` marshals back to the main thre
   heavy load from other apps, Whisper will be slow too. Check Activity
   Monitor if this seems unusually severe.
 - **Stuck on "Transcribing"** — hit **Esc** to force-cancel it and free up
-  the hotkey right away, instead of waiting it out.
+  the hotkey right away, instead of waiting it out. This can happen when
+  PortAudio's mic stream teardown hangs (most often triggered by a
+  Continuity Camera/iPhone mic appearing or disappearing mid-recording) —
+  as of 0.1.4 the app auto-recovers from this within 2 seconds on its own,
+  so Esc should rarely be needed for this specific case anymore.
 
 ## Todo
 
