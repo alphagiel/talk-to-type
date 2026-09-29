@@ -5,6 +5,8 @@ hotkey (only if a text box is focused), record audio, turn it into text,
 and type that text into whatever's focused.
 """
 import datetime
+import faulthandler
+import signal
 import threading
 import time
 
@@ -20,6 +22,11 @@ from ptt_dictation.transcriber import Transcriber
 
 FLASH_SECONDS = 1.2
 SILENCE_RMS_THRESHOLD = 0.01
+# If a recording is still "Transcribing" this long after the key came up
+# (plus however long it was held, since longer audio takes longer to
+# transcribe), something is hung -- dump every thread's stack to the
+# console and reset the app so it's usable again.
+STUCK_BASE_SECONDS = 30
 
 
 def _log(message: str) -> None:
@@ -39,6 +46,7 @@ class PTTDictationApp(rumps.App):
         self._recording_active = False
         self._busy = False
         self._max_length_timer = None
+        self._stuck_timer = None
         # Bumped on every new hold and on every force-cancel. A background
         # _process_recording thread checks this before touching shared state
         # or typing anything -- if it's stale (Esc cancelled it, or another
@@ -73,6 +81,12 @@ class PTTDictationApp(rumps.App):
             None,
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
+
+        # faulthandler dumps stacks from C, without needing the GIL -- so it
+        # still works when some native call has frozen every Python thread.
+        # `kill -USR1 <pid>` dumps all threads on demand.
+        faulthandler.enable()
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
 
         self._startup_permission_check()
         self._start_listener()
@@ -205,18 +219,35 @@ class PTTDictationApp(rumps.App):
         if not (self._recording_active or self._busy):
             return  # Nothing in flight -- let Esc do whatever it normally does.
         _log("ESC pressed, force-cancelling.")
+        self._reset(discard_label="discarded")
+
+    def _reset(self, discard_label):
+        """Drops whatever's in flight and puts the app back to idle. Never
+        blocks -- this runs on the key-tap thread."""
         self._generation += 1
-        if self._max_length_timer:
-            self._max_length_timer.cancel()
-            self._max_length_timer = None
+        self._cancel_timers()
         if self._recording_active:
             self._recording_active = False
-            try:
-                self.recorder.stop()
-            except Exception as e:
-                _log(f"Error stopping recorder during cancel: {e}")
+            stream, chunks = self.recorder.detach()
+            threading.Thread(
+                target=self.recorder.finish, args=(stream, chunks), daemon=True
+            ).start()
         self._busy = False
-        self._flash("discarded")
+        self._flash(discard_label)
+
+    def _cancel_timers(self):
+        for timer in (self._max_length_timer, self._stuck_timer):
+            if timer:
+                timer.cancel()
+        self._max_length_timer = None
+        self._stuck_timer = None
+        faulthandler.cancel_dump_traceback_later()
+
+    def _on_stuck(self, generation):
+        if generation != self._generation:
+            return
+        _log("Still not done -- looks hung, resetting. (Thread dump above.)")
+        self._reset(discard_label="error")
 
     def _on_hotkey_up(self):
         _log("Hotkey UP")
@@ -229,22 +260,33 @@ class PTTDictationApp(rumps.App):
         self._busy = True
         self.overlay.set_state("transcribing")
 
-        # Stop recording right here since that's quick, but hand off the
-        # slow stuff (checking for silence, saving, transcribing) to
-        # another thread. This function runs on the same thread that's
-        # watching for the hotkey -- if we make it wait too long, Mac
-        # will think that key-watching is broken and shut it off.
-        buffer, sample_rate = self.recorder.stop()
+        # This runs on the key-tap thread, so nothing here may block --
+        # macOS disables a key-tap whose callback stalls. Grab the stream
+        # (instant) and hand the teardown, which PortAudio can hang on,
+        # plus all the slow stuff to a background thread.
+        stream, chunks = self.recorder.detach()
         held_ms = (time.time() - self._press_time) * 1000 if self._press_time else 0
         generation = self._generation
+
+        stuck_seconds = STUCK_BASE_SECONDS + held_ms / 1000
+        faulthandler.dump_traceback_later(stuck_seconds)
+        # +1s so the stack dump prints before the reset cancels it.
+        self._stuck_timer = threading.Timer(stuck_seconds + 1, self._on_stuck, args=(generation,))
+        self._stuck_timer.daemon = True
+        self._stuck_timer.start()
+
         threading.Thread(
             target=self._process_recording,
-            args=(buffer, sample_rate, held_ms, generation),
+            args=(stream, chunks, held_ms, generation),
             daemon=True,
         ).start()
 
-    def _process_recording(self, buffer, sample_rate, held_ms, generation):
+    def _process_recording(self, stream, chunks, held_ms, generation):
         try:
+            buffer, sample_rate = self.recorder.finish(stream, chunks)
+            if generation != self._generation:
+                return  # Esc (or the stuck watchdog) already cleaned up.
+
             if held_ms < self.config["min_hold_ms"]:
                 _log(f"Discarded: held for {held_ms:.0f}ms, below {self.config['min_hold_ms']}ms minimum.")
                 self._flash("discarded")
@@ -303,6 +345,7 @@ class PTTDictationApp(rumps.App):
             # so -- otherwise a late-finishing cancelled run could
             # re-enable input processing before it's actually settled.
             if generation == self._generation:
+                self._cancel_timers()
                 self._busy = False
 
     # -- Lifecycle ---------------------------------------------------------

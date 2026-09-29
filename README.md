@@ -79,7 +79,8 @@ turns on in that case.
 If it ever seems stuck on "Transcribing" longer than expected, hit **Esc**
 to force-cancel it — that immediately clears the stuck state so you can
 hold the key again right away. (Because of this, Escape can never be set
-as your push-to-talk key.)
+as your push-to-talk key.) If you don't, it resets itself anyway once it's
+been stuck for 30 seconds (plus however long you held the key).
 
 ## Configuration
 
@@ -200,11 +201,12 @@ sequenceDiagram
 
     User->>Hotkey: releases hotkey
     Hotkey->>App: _on_hotkey_up()
-    App->>Rec: stop() → (buffer, sample_rate)
     App->>Overlay: set_state("transcribing")
-    App->>App: spawn daemon thread _process_recording()
+    App->>Rec: detach() → (stream, chunks) — instant, never blocks
+    App->>App: arm stuck watchdog, spawn daemon thread _process_recording()
 
     Note over App,Trans: offloaded to a background thread so the<br/>hotkey callback returns fast (macOS can disable<br/>a "stuck" key-tap otherwise)
+    App->>Rec: finish(stream, chunks) → (buffer, sample_rate)
     App->>Trans: transcribe(buffer)
     Trans-->>App: text
     App->>Insert: focused_field_is_text_input() (re-check — focus may have moved)
@@ -219,7 +221,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `main.py` | Orchestrates everything; `rumps.App` runloop on the main thread | `PTTDictationApp` |
 | `hotkey_listener.py` | Global key down/up detection | `create_listener()` → `PynputHotkeyListener` (right_option/right_command) or `FnHotkeyListener` (raw Quartz event tap) |
-| `audio_recorder.py` | Mic capture into an in-memory buffer | `AudioRecorder.start()` / `.stop()`, `rms()` |
+| `audio_recorder.py` | Mic capture into an in-memory buffer | `AudioRecorder.start()`, `.detach()` + `.finish()` (or `.stop()`), `rms()` |
 | `transcriber.py` | Runs Whisper on the recorded buffer | `Transcriber.load()`, `.is_ready`, `.transcribe(buffer)` |
 | `text_inserter.py` | Finds the focused text field and types the result in | `focused_field_is_text_input()`, `frontmost_bundle_id()`, `insert_text()` |
 | `indicator_overlay.py` | Floating "Listening / Transcribing" indicator | `IndicatorOverlay.set_state()`, `.hide()` |
@@ -230,7 +232,10 @@ Threading model: hotkey listening runs on its own thread (pynput's internal
 thread, or a polling daemon thread for `fn`); the Whisper model loads on a
 background thread at startup; and each hold-to-release cycle's transcription
 and text insertion runs on a fresh daemon thread so the hotkey callback
-itself stays fast. `IndicatorOverlay.set_state()` marshals back to the main thread
+itself stays fast. That includes tearing down the mic stream: the key-up
+and Esc callbacks only `detach()` the stream, and the actual
+`stop()`/`close()` (which PortAudio can hang on) happens off the key-tap
+thread. `IndicatorOverlay.set_state()` marshals back to the main thread
 (`AppHelper.callAfter`) since AppKit UI must run there.
 
 ## Privacy
@@ -261,7 +266,17 @@ itself stays fast. `IndicatorOverlay.set_state()` marshals back to the main thre
   PortAudio's mic stream teardown hangs (most often triggered by a
   Continuity Camera/iPhone mic appearing or disappearing mid-recording) —
   as of 0.1.4 the app auto-recovers from this within 2 seconds on its own,
-  so Esc should rarely be needed for this specific case anymore.
+  so Esc should rarely be needed for this specific case anymore. As of
+  0.1.5, if it's still stuck after 30s (plus hold time), a watchdog dumps
+  every thread's stack to the console and resets to idle. You can also
+  dump stacks on demand with `kill -USR1 <pid>`. The dump comes from
+  `faulthandler`, so it works even when every Python thread is frozen.
+  Include it when you report a hang.
+- **Esc does nothing / fixes don't seem to apply** — check which version
+  you're actually running. A global `npm install -g` is a copy, so it
+  doesn't update when the repo does. Compare
+  `$(npm root -g)/talk-to-type/package.json` against the repo and
+  reinstall if it's behind.
 
 ## Todo
 
