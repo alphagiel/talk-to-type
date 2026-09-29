@@ -54,34 +54,50 @@ class AudioRecorder:
                 "abandoning it and continuing with whatever audio we've got"
             )
 
-    def _callback(self, indata, frames, time_info, status):
-        if status:
-            # Something glitched (a dropped chunk, etc.) but it's not
-            # serious enough to stop recording -- just log it.
-            print(f"[audio_recorder] stream status: {status}")
-        self._chunks.append(indata.copy())
-
     def start(self):
-        self._chunks = []
+        # Each recording gets its own chunk list, bound into its own
+        # callback -- so a stale stream still being torn down on another
+        # thread can never append into (or wipe) a newer recording's audio.
+        chunks = []
+
+        def _callback(indata, frames, time_info, status):
+            if status:
+                # Something glitched (a dropped chunk, etc.) but it's not
+                # serious enough to stop recording -- just log it.
+                print(f"[audio_recorder] stream status: {status}")
+            chunks.append(indata.copy())
+
+        self._chunks = chunks
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=CHANNELS,
             dtype=DTYPE,
-            callback=self._callback,
+            callback=_callback,
         )
         self._stream.start()
 
-    def stop(self) -> tuple:
-        if self._stream is not None:
-            self._close_stream_with_timeout(self._stream)
-            self._stream = None
+    def detach(self) -> tuple:
+        """Instantly hands off the live recording as (stream, chunks) and
+        resets the recorder so start() can be called again. Never blocks --
+        pass the result to finish() on a background thread.
+        """
+        stream, chunks = self._stream, self._chunks
+        self._stream, self._chunks = None, []
+        return stream, chunks
 
-        if not self._chunks:
+    def finish(self, stream, chunks) -> tuple:
+        """Tears down a detached stream (slow, can hang) and returns the audio."""
+        if stream is not None:
+            self._close_stream_with_timeout(stream)
+
+        if not chunks:
             return np.zeros((0,), dtype=np.float32), self.sample_rate
 
-        buffer = np.concatenate(self._chunks, axis=0).flatten()
-        self._chunks = []
+        buffer = np.concatenate(chunks, axis=0).flatten()
         return buffer, self.sample_rate
+
+    def stop(self) -> tuple:
+        return self.finish(*self.detach())
 
 
 def rms(buffer: np.ndarray) -> float:
