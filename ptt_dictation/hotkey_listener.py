@@ -39,6 +39,12 @@ class HotkeyListener:
     def stop(self):
         raise NotImplementedError
 
+    def ensure_alive(self) -> bool:
+        """Health check, called every few seconds. If macOS switched the
+        key-tap off (it does that when a callback stalls), turns it back on.
+        Returns False if the listener is dead and needs a full restart."""
+        raise NotImplementedError
+
     def _fire_down(self):
         if not self._is_down:
             self._is_down = True
@@ -48,6 +54,22 @@ class HotkeyListener:
         if self._is_down:
             self._is_down = False
             self.on_up()
+
+
+def _reenable_tap_if_disabled(tap) -> None:
+    if tap is not None and not Quartz.CGEventTapIsEnabled(tap):
+        Quartz.CGEventTapEnable(tap, True)
+
+
+class _TapTrackingListener(keyboard.Listener):
+    """pynput's listener, but it remembers its key-tap so we can check
+    whether macOS has switched it off -- pynput itself never notices."""
+
+    tap = None
+
+    def _create_event_tap(self):
+        self.tap = super()._create_event_tap()
+        return self.tap
 
 
 class PynputHotkeyListener(HotkeyListener):
@@ -67,7 +89,7 @@ class PynputHotkeyListener(HotkeyListener):
             self._fire_up()
 
     def start(self):
-        self._listener = keyboard.Listener(
+        self._listener = _TapTrackingListener(
             on_press=self._on_press, on_release=self._on_release
         )
         self._listener.start()
@@ -76,6 +98,12 @@ class PynputHotkeyListener(HotkeyListener):
         if self._listener:
             self._listener.stop()
             self._listener = None
+
+    def ensure_alive(self) -> bool:
+        if self._listener is None or not self._listener.is_alive():
+            return False
+        _reenable_tap_if_disabled(self._listener.tap)
+        return True
 
 
 class FnHotkeyListener(HotkeyListener):
@@ -95,6 +123,12 @@ class FnHotkeyListener(HotkeyListener):
         self._stop_requested = False
 
     def _callback(self, proxy, event_type, event, refcon):
+        if event_type in (
+            Quartz.kCGEventTapDisabledByTimeout,
+            Quartz.kCGEventTapDisabledByUserInput,
+        ):
+            Quartz.CGEventTapEnable(self._tap, True)
+            return event
         if event_type == Quartz.kCGEventFlagsChanged:
             flags = Quartz.CGEventGetFlags(event)
             fn_down = bool(flags & Quartz.kCGEventFlagMaskSecondaryFn)
@@ -139,6 +173,12 @@ class FnHotkeyListener(HotkeyListener):
         self._stop_requested = True
         if self._tap is not None:
             Quartz.CGEventTapEnable(self._tap, False)
+
+    def ensure_alive(self) -> bool:
+        if self._thread is None or not self._thread.is_alive():
+            return False
+        _reenable_tap_if_disabled(self._tap)
+        return True
 
 
 def create_listener(hotkey_name: str, on_down, on_up) -> HotkeyListener:
