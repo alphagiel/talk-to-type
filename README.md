@@ -272,6 +272,14 @@ thread. `IndicatorOverlay.set_state()` marshals back to the main thread
   dump stacks on demand with `kill -USR1 <pid>`. The dump comes from
   `faulthandler`, so it works even when every Python thread is frozen.
   Include it when you report a hang.
+- **Hotkey randomly stops responding until you restart** — as of 0.1.6
+  the app recovers from this on its own. Key presses are handled off the
+  key-tap thread, so a slow or crashing press can't make macOS switch the
+  tap off or kill the listener. A watchdog also checks every 5 seconds
+  and restarts a dead listener or turns a disabled tap back on. If it
+  still happens, look for `Hotkey listener died -- restarting it.` or an
+  `ERROR in ...` stack trace in the console and include it when you
+  report it.
 - **Esc does nothing / fixes don't seem to apply** — check which version
   you're actually running. A global `npm install -g` is a copy, so it
   doesn't update when the repo does. Compare
