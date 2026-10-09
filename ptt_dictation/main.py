@@ -6,9 +6,11 @@ and type that text into whatever's focused.
 """
 import datetime
 import faulthandler
+import queue
 import signal
 import threading
 import time
+import traceback
 
 import rumps
 import sounddevice as sd
@@ -27,6 +29,9 @@ SILENCE_RMS_THRESHOLD = 0.01
 # transcribe), something is hung -- dump every thread's stack to the
 # console and reset the app so it's usable again.
 STUCK_BASE_SECONDS = 30
+# How often to check that the key listeners are still alive (and switch
+# their key-tap back on if macOS turned it off).
+LISTENER_CHECK_SECONDS = 5
 
 
 def _log(message: str) -> None:
@@ -52,9 +57,13 @@ class PTTDictationApp(rumps.App):
         # or typing anything -- if it's stale (Esc cancelled it, or another
         # hold already started), it just drops its result instead.
         self._generation = 0
-        self.escape_listener = PynputHotkeyListener(
-            keyboard.Key.esc, on_down=self._on_escape, on_up=lambda: None
-        )
+        # Key presses get queued here and handled one at a time on a worker
+        # thread, never on the key-tap thread itself -- the press handling
+        # does slow stuff (asking the focused app what's focused, opening
+        # the mic), and macOS switches off a key-tap whose callback stalls.
+        self._events = queue.Queue()
+        self._listener_lock = threading.Lock()
+        self.escape_listener = self._make_escape_listener()
         # Which app we last successfully typed into -- if you're still in
         # that same app next time, we add a leading space so back-to-back
         # sentences don't run together with no gap between them.
@@ -89,8 +98,10 @@ class PTTDictationApp(rumps.App):
         faulthandler.register(signal.SIGUSR1, all_threads=True)
 
         self._startup_permission_check()
+        threading.Thread(target=self._event_worker, daemon=True).start()
         self._start_listener()
         self.escape_listener.start()
+        threading.Thread(target=self._listener_watchdog, daemon=True).start()
         self._start_model_loading()
 
     # -- Transcription model ----------------------------------------------
@@ -152,7 +163,9 @@ class PTTDictationApp(rumps.App):
         hotkey_name = self.config["hotkey"]
         _log(f"Starting hotkey listener for: {config.HOTKEY_LABELS.get(hotkey_name, hotkey_name)}")
         self.listener = create_listener(
-            hotkey_name, on_down=self._on_hotkey_down, on_up=self._on_hotkey_up
+            hotkey_name,
+            on_down=lambda: self._events.put(self._on_hotkey_down),
+            on_up=lambda: self._events.put(self._on_hotkey_up),
         )
         try:
             self.listener.start()
@@ -160,9 +173,46 @@ class PTTDictationApp(rumps.App):
             _log(f"ERROR: {e}")
 
     def _restart_listener(self):
-        if self.listener:
-            self.listener.stop()
-        self._start_listener()
+        with self._listener_lock:
+            if self.listener:
+                self.listener.stop()
+            self._start_listener()
+
+    def _make_escape_listener(self):
+        return PynputHotkeyListener(
+            keyboard.Key.esc, on_down=self._on_escape, on_up=lambda: None
+        )
+
+    def _event_worker(self):
+        """Handles queued key presses one at a time. A crash in here only
+        loses that one press -- it can't take the key listener down with it,
+        which is what used to happen when it ran on the key-tap thread."""
+        while True:
+            handler = self._events.get()
+            try:
+                handler()
+            except Exception:
+                _log(f"ERROR in {handler.__name__}:\n{traceback.format_exc()}")
+                self._reset(discard_label="error")
+
+    def _listener_watchdog(self):
+        """Every few seconds, makes sure both key listeners are still alive
+        and their key-taps are switched on. Restarts any that died."""
+        while True:
+            time.sleep(LISTENER_CHECK_SECONDS)
+            try:
+                with self._listener_lock:
+                    hotkey_ok = self.listener is not None and self.listener.ensure_alive()
+                if not hotkey_ok:
+                    _log("Hotkey listener died -- restarting it.")
+                    self._restart_listener()
+                if not self.escape_listener.ensure_alive():
+                    _log("Esc listener died -- restarting it.")
+                    self.escape_listener.stop()
+                    self.escape_listener = self._make_escape_listener()
+                    self.escape_listener.start()
+            except Exception:
+                _log(f"ERROR in listener watchdog:\n{traceback.format_exc()}")
 
     def _flash(self, state: str, seconds: float = FLASH_SECONDS):
         self.overlay.set_state(state)
@@ -213,17 +263,22 @@ class PTTDictationApp(rumps.App):
 
     def _on_max_length_reached(self):
         _log(f"Max recording length ({self.config['max_record_seconds']}s) reached, auto-stopping.")
-        self._on_hotkey_up()
+        self._events.put(self._on_hotkey_up)
 
     def _on_escape(self):
         if not (self._recording_active or self._busy):
             return  # Nothing in flight -- let Esc do whatever it normally does.
         _log("ESC pressed, force-cancelling.")
-        self._reset(discard_label="discarded")
+        # Runs right on the key-tap thread (so Esc still works even if the
+        # worker is busy) -- never let an error escape into pynput.
+        try:
+            self._reset(discard_label="discarded")
+        except Exception:
+            _log(f"ERROR in Esc handler:\n{traceback.format_exc()}")
 
     def _reset(self, discard_label):
         """Drops whatever's in flight and puts the app back to idle. Never
-        blocks -- this runs on the key-tap thread."""
+        blocks -- Esc calls this right on the key-tap thread."""
         self._generation += 1
         self._cancel_timers()
         if self._recording_active:
@@ -260,8 +315,7 @@ class PTTDictationApp(rumps.App):
         self._busy = True
         self.overlay.set_state("transcribing")
 
-        # This runs on the key-tap thread, so nothing here may block --
-        # macOS disables a key-tap whose callback stalls. Grab the stream
+        # Keep the worker thread free for the next press: grab the stream
         # (instant) and hand the teardown, which PortAudio can hang on,
         # plus all the slow stuff to a background thread.
         stream, chunks = self.recorder.detach()

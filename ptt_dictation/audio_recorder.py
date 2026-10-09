@@ -22,6 +22,8 @@ DTYPE = "float32"
 # appearing or disappearing is the usual trigger). If it doesn't respond in
 # this long, give up on it rather than freezing the whole app.
 STOP_TIMEOUT_SECONDS = 2.0
+# Same story for opening/starting the stream.
+START_TIMEOUT_SECONDS = 2.0
 
 
 class AudioRecorder:
@@ -68,13 +70,51 @@ class AudioRecorder:
             chunks.append(indata.copy())
 
         self._chunks = chunks
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=CHANNELS,
-            dtype=DTYPE,
-            callback=_callback,
-        )
-        self._stream.start()
+        self._stream = self._open_stream_with_timeout(_callback)
+
+    def _open_stream_with_timeout(self, callback):
+        """Opens and starts the mic stream on a side thread -- PortAudio can
+        hang on start just like on stop. If it doesn't come up in time, raise
+        PortAudioError like any other mic failure; if it does come up late,
+        the side thread shuts it straight back down so no orphaned stream is
+        left holding the mic.
+        """
+        done = threading.Event()
+        result = {}
+        lock = threading.Lock()
+
+        def _open():
+            try:
+                stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=CHANNELS,
+                    dtype=DTYPE,
+                    callback=callback,
+                )
+                stream.start()
+            except Exception as e:
+                result["error"] = e
+                done.set()
+                return
+            with lock:
+                if result.get("abandoned"):
+                    stream.stop()
+                    stream.close()
+                    return
+                result["stream"] = stream
+                done.set()
+
+        threading.Thread(target=_open, daemon=True).start()
+        if not done.wait(timeout=START_TIMEOUT_SECONDS):
+            with lock:
+                if "stream" not in result and "error" not in result:
+                    result["abandoned"] = True
+            if result.get("abandoned"):
+                _log(f"stream start didn't finish within {START_TIMEOUT_SECONDS}s -- giving up on it")
+                raise sd.PortAudioError("timed out starting the mic stream")
+        if "error" in result:
+            raise result["error"]
+        return result["stream"]
 
     def detach(self) -> tuple:
         """Instantly hands off the live recording as (stream, chunks) and
