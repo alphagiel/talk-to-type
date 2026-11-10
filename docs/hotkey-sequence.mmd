@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant User
+    participant Hotkey as hotkey_listener
+    participant App as main.py (PTTDictationApp)
+    participant Perm as permissions
+    participant Insert as text_inserter
+    participant Rec as audio_recorder
+    participant Overlay as indicator_overlay
+    participant Trans as transcriber (bg thread)
+
+    User->>Hotkey: holds hotkey
+    Hotkey->>App: _on_hotkey_down()
+    App->>Perm: check_accessibility() / microphone_denied()
+    App->>Insert: focused_field_is_text_input()
+    Insert-->>App: (true, role) — else bail, no mic
+    App->>Rec: start()
+    App->>Overlay: set_state("listening")
+
+    User->>Hotkey: releases hotkey
+    Hotkey->>App: _on_hotkey_up()
+    App->>Overlay: set_state("transcribing")
+    App->>Rec: detach() → (stream, chunks) — instant, never blocks
+    App->>App: arm stuck watchdog, spawn daemon thread _process_recording()
+
+    Note over App,Trans: offloaded to a background thread so the<br/>hotkey callback returns fast (macOS can disable<br/>a "stuck" key-tap otherwise)
+    App->>Rec: finish(stream, chunks) → (buffer, sample_rate)
+    App->>Trans: transcribe(buffer)
+    Trans-->>App: text
+    App->>Insert: focused_field_is_text_input() (re-check — focus may have moved)
+    App->>Insert: insert_text(text)
+    Insert-->>App: "ax" | "keystroke" | "failed"
+    App->>Overlay: hide() / flash("error" | "discarded")

@@ -133,87 +133,11 @@ text insertion, the menu bar UI — is the Python package `ptt_dictation`,
 orchestrated by `PTTDictationApp` (`main.py`, a `rumps.App` subclass running
 the AppKit runloop on the main thread).
 
-```mermaid
-graph TD
-    subgraph Node["Node.js (launcher only)"]
-        PI[scripts/postinstall.js]
-        CLI[bin/talk-to-type.js]
-    end
-    subgraph Python["Python process — ptt_dictation"]
-        Main["main.py<br/>PTTDictationApp"]
-        Hotkey[hotkey_listener.py]
-        Audio[audio_recorder.py]
-        Trans[transcriber.py]
-        Insert[text_inserter.py]
-        Overlay[indicator_overlay.py]
-        Perm[permissions.py]
-        Config[config.py]
-    end
-    subgraph OS["macOS / external"]
-        AX[Accessibility API]
-        Quartz["Quartz / CGEvent"]
-        AV["AVFoundation (mic)"]
-        PA["PortAudio (sounddevice)"]
-        HF["faster-whisper / Hugging Face model"]
-    end
-
-    PI -- "npm install: builds venv, pip installs deps" --> Python
-    CLI -- "spawn python -m ptt_dictation.main" --> Main
-
-    Main --> Hotkey
-    Main --> Audio
-    Main --> Trans
-    Main --> Insert
-    Main --> Overlay
-    Main --> Perm
-    Main --> Config
-
-    Hotkey --> Quartz
-    Insert --> AX
-    Insert --> Quartz
-    Audio --> PA
-    Perm --> AX
-    Perm --> AV
-    Perm --> Quartz
-    Trans --> HF
-```
+![Architecture diagram](https://raw.githubusercontent.com/alphagiel/talk-to-type/main/docs/architecture.svg)
 
 Sequence for one hold-to-release cycle:
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Hotkey as hotkey_listener
-    participant App as main.py (PTTDictationApp)
-    participant Perm as permissions
-    participant Insert as text_inserter
-    participant Rec as audio_recorder
-    participant Overlay as indicator_overlay
-    participant Trans as transcriber (bg thread)
-
-    User->>Hotkey: holds hotkey
-    Hotkey->>App: _on_hotkey_down()
-    App->>Perm: check_accessibility() / microphone_denied()
-    App->>Insert: focused_field_is_text_input()
-    Insert-->>App: (true, role) — else bail, no mic
-    App->>Rec: start()
-    App->>Overlay: set_state("listening")
-
-    User->>Hotkey: releases hotkey
-    Hotkey->>App: _on_hotkey_up()
-    App->>Overlay: set_state("transcribing")
-    App->>Rec: detach() → (stream, chunks) — instant, never blocks
-    App->>App: arm stuck watchdog, spawn daemon thread _process_recording()
-
-    Note over App,Trans: offloaded to a background thread so the<br/>hotkey callback returns fast (macOS can disable<br/>a "stuck" key-tap otherwise)
-    App->>Rec: finish(stream, chunks) → (buffer, sample_rate)
-    App->>Trans: transcribe(buffer)
-    Trans-->>App: text
-    App->>Insert: focused_field_is_text_input() (re-check — focus may have moved)
-    App->>Insert: insert_text(text)
-    Insert-->>App: "ax" | "keystroke" | "failed"
-    App->>Overlay: hide() / flash("error" | "discarded")
-```
+![Hold-to-release sequence diagram](https://raw.githubusercontent.com/alphagiel/talk-to-type/main/docs/hotkey-sequence.svg)
 
 ### Module reference
 
