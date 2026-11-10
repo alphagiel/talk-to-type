@@ -1,0 +1,42 @@
+graph TD
+    subgraph Node["Node.js (launcher only)"]
+        PI[scripts/postinstall.js]
+        CLI[bin/talk-to-type.js]
+    end
+    subgraph Python["Python process — ptt_dictation"]
+        Main["main.py<br/>PTTDictationApp"]
+        Hotkey[hotkey_listener.py]
+        Audio[audio_recorder.py]
+        Trans[transcriber.py]
+        Insert[text_inserter.py]
+        Overlay[indicator_overlay.py]
+        Perm[permissions.py]
+        Config[config.py]
+    end
+    subgraph OS["macOS / external"]
+        AX[Accessibility API]
+        Quartz["Quartz / CGEvent"]
+        AV["AVFoundation (mic)"]
+        PA["PortAudio (sounddevice)"]
+        HF["faster-whisper / Hugging Face model"]
+    end
+
+    PI -- "npm install: builds venv, pip installs deps" --> Python
+    CLI -- "spawn python -m ptt_dictation.main" --> Main
+
+    Main --> Hotkey
+    Main --> Audio
+    Main --> Trans
+    Main --> Insert
+    Main --> Overlay
+    Main --> Perm
+    Main --> Config
+
+    Hotkey --> Quartz
+    Insert --> AX
+    Insert --> Quartz
+    Audio --> PA
+    Perm --> AX
+    Perm --> AV
+    Perm --> Quartz
+    Trans --> HF
